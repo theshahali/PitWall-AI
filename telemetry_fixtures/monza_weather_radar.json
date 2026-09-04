@@ -1,0 +1,19 @@
+{
+    "circuit": "Autodromo Nazionale Monza",
+    "coordinates": {"lat": 45.6189, "lng": 9.2812},
+    "session": "Race Day Forecast",
+    "track_temperature_celsius": 42.5,
+    "ambient_temperature_celsius": 29.1,
+    "track_state": "DRY",
+    "surface_grip_index": 0.88,
+    "wind": {
+        "speed_kmh": 11.4,
+        "direction": "NE (Headwind down Rettifilo)",
+        "gusts_kmh": 16.2
+    },
+    "meteorological_radar": {
+        "precipitation_probability_pct": 12,
+        "cloud_cover_pct": 25,
+        "safety_car_probability_pct": 35
+    }
+}
