@@ -1,4 +1,4 @@
-﻿const { createClient } = require('genlayer-js');
+const { createClient } = require('genlayer-js');
 const { keccak256, toHex, encodeFunctionData } = require('viem');
 
 const CONTRACT_ADDRESS = '0x7d84D93C1db63BD67fCd460Dae6f708769aD0c06';
@@ -13,17 +13,33 @@ async function runE2ETest() {
   console.log(`[TEST 1] Connecting to Submitted GenLayer Contract: ${CONTRACT_ADDRESS}...`);
   const client = createClient({ endpoint: GENLAYER_RPC });
   
-  const market = await client.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: 'get_market',
-    args: ['MONZA_2026_NORRIS']
-  });
-
-  if (!market || !market.market_id) {
-    throw new Error("[FAIL] Could not query live market from GenLayer contract!");
+  async function readWithRetry(fnName, args, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await client.readContract({
+          address: CONTRACT_ADDRESS,
+          functionName: fnName,
+          args: args
+        });
+      } catch (err) {
+        if (attempt === maxRetries) throw err;
+        console.log(`  [RETRY] Attempt ${attempt} failed (${err.message.slice(0, 40)}...). Retrying in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
   }
-  console.log(`✓ [PASS] Successfully queried live contract: ${market.race_name} (${market.circuit})`);
-  console.log(`       Target Driver: ${market.target_driver} | Status: ${market.status} | Winner: ${market.winner_outcome}`);
+
+  const totalMarkets = await readWithRetry('get_total_markets', []);
+  console.log(`✓ [PASS] Total Registered Polymarket Bets on Contract: ${totalMarkets}`);
+
+  const market = await readWithRetry('get_market', ['MONZA_2026_NORRIS']);
+  const leclercMarket = await readWithRetry('get_market', ['MONZA_2026_LECLERC_PODIUM']);
+
+  if (!market || !market.market_id || !leclercMarket || !leclercMarket.market_id) {
+    throw new Error("[FAIL] Could not query live markets from GenLayer contract!");
+  }
+  console.log(`✓ [PASS] Market 1: ${market.race_name} -> ${market.target_driver} (Status: ${market.status})`);
+  console.log(`✓ [PASS] Market 2: ${leclercMarket.race_name} -> ${leclercMarket.target_driver} (Status: ${leclercMarket.status}, Edge: +${leclercMarket.edge_pct}% EV)`);
 
   // 2. Validate Multi-Validator Consensus Debrief
   console.log("\n[TEST 2] Verifying Multi-Validator Consensus & Alpha Edge from Live Contract Storage...");
