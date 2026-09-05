@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 
 // Live Upgraded Intelligent Contract with Native On-Chain Vault
-const CONTRACT_ADDRESS = '0x1BB06fA3A47dECeb8f33eb50EF050651b66F2a03' as any;
+const CONTRACT_ADDRESS = '0x3f6E2Bb5cbe483F937B7bd0D325bc39b11d77656' as any;
 const GENLAYER_RPC = 'https://studio.genlayer.com/api';
 const EVM_VAULT_ADDRESS = '0x49B317cA7e19F4F64Ad83bFEB8E82B31f57560B8' as any;
 
