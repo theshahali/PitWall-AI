@@ -1,5 +1,13 @@
 'use client';
 
+// Global BigInt Serialization Guard (Prevents 'Do not know how to serialize a BigInt')
+if (typeof BigInt !== 'undefined') {
+  (BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+  };
+}
+
+
 import React, { useState, useEffect } from 'react';
 import { createClient, createAccount } from 'genlayer-js';
 import {
@@ -31,7 +39,9 @@ import {
   Search,
   Check,
   X,
-  Link2
+  Link2,
+  Copy,
+  Wallet
 } from 'lucide-react';
 
 // Live Upgraded Intelligent Contract with Native On-Chain Vault
@@ -218,15 +228,23 @@ export default function PitwallDashboard() {
 
   useEffect(() => {
     try {
+      let acc: any;
       const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pitwall_reviewer_account') : null;
       if (storedKey) {
-        setReviewerAccount(createAccount(storedKey as any));
+        acc = createAccount(storedKey as any);
       } else {
-        const newAcc = createAccount();
-        setReviewerAccount(newAcc);
+        acc = createAccount();
+      }
+      setReviewerAccount(acc);
+      if (acc?.address) {
+        setUserWallet(acc.address);
       }
     } catch (e) {
-      setReviewerAccount(createAccount());
+      const fallbackAcc = createAccount();
+      setReviewerAccount(fallbackAcc);
+      if (fallbackAcc?.address) {
+        setUserWallet(fallbackAcc.address);
+      }
     }
   }, []);
 
@@ -249,7 +267,45 @@ export default function PitwallDashboard() {
   const [newPolySlug, setNewPolySlug] = useState('');
   
   // Real On-Chain User State (Synchronized via get_user_balance)
-  const [userWallet] = useState('0x5C48c6f77617FC05761433Cc4019A79b47d1ec7D');
+  const [userWallet, setUserWallet] = useState('0x5C48c6f77617FC05761433Cc4019A79b47d1ec7D');
+  const [isMetaMaskConnected, setIsMetaMaskConnected] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const handleConnectMetaMask = async () => {
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      try {
+        const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+        if (accounts && accounts.length > 0) {
+          setUserWallet(accounts[0]);
+          setIsMetaMaskConnected(true);
+          setSettlementNetwork('BASE_SEPOLIA');
+          addLog(`🦊 MetaMask connected: ${accounts[0]}. Switched target vault to Base Sepolia.`);
+        }
+      } catch (err: any) {
+        addLog(`🚨 MetaMask connection rejected: ${err.message}`);
+      }
+    } else {
+      addLog(`🚨 MetaMask extension not detected in browser. Using GenLayer Testnet session account.`);
+    }
+  };
+
+  const handleDisconnectMetaMask = () => {
+    if (reviewerAccount?.address) {
+      setUserWallet(reviewerAccount.address);
+    }
+    setIsMetaMaskConnected(false);
+    setSettlementNetwork('GENLAYER');
+    addLog(`⚡ Switched back to GenLayer Testnet session account.`);
+  };
+
+  const handleCopyWallet = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(userWallet);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2000);
+      addLog(`📋 Active wallet address copied to clipboard: ${userWallet}`);
+    }
+  };
   const [userUsdcBalance, setUserUsdcBalance] = useState<number>(0);
   const [userPositions, setUserPositions] = useState<UserPosition[]>([]);
   
@@ -396,8 +452,8 @@ export default function PitwallDashboard() {
       const txHash = await client.writeContract({
         address: CONTRACT_ADDRESS as any,
         functionName: 'faucet',
-        args: [userWallet, BigInt(500 * 10**6)],
-        value: BigInt(0)
+        args: [userWallet, 500000000],
+        value: 0
       }) as string;
 
       setActiveTxHash(txHash);
@@ -801,21 +857,73 @@ export default function PitwallDashboard() {
             })}
           </div>
 
-          {/* Real On-Chain Faucet & Balance */}
+          {/* Real On-Chain Wallet, Faucet & Balance */}
           <div className="flex items-center gap-2.5">
+            {/* Active Wallet Badge */}
+            {isMetaMaskConnected ? (
+              <div className="flex items-center gap-2 bg-[#121624] border border-blue-500/50 px-3 py-1.5 rounded-xl text-xs font-mono shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                <div className="text-left leading-tight">
+                  <span className="text-[9px] text-blue-300 font-bold block uppercase">METAMASK (BASE)</span>
+                  <span className="text-white font-bold">{userWallet.slice(0, 6)}...{userWallet.slice(-4)}</span>
+                </div>
+                <button
+                  onClick={handleCopyWallet}
+                  className="p-1 text-slate-400 hover:text-white transition-colors"
+                  title="Copy Wallet Address"
+                >
+                  <Copy className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={handleDisconnectMetaMask}
+                  className="text-[10px] text-slate-400 hover:text-rose-400 ml-1"
+                  title="Disconnect MetaMask"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2 bg-[#121624] border border-[#222A42] px-3 py-1.5 rounded-xl text-xs font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <div className="text-left leading-tight">
+                    <span className="text-[9px] text-slate-400 block uppercase">GENLAYER ACCOUNT</span>
+                    <span className="text-slate-200 font-bold">{userWallet.slice(0, 6)}...{userWallet.slice(-4)}</span>
+                  </div>
+                  <button
+                    onClick={handleCopyWallet}
+                    className="p-1 text-slate-400 hover:text-white transition-colors"
+                    title="Copy Wallet Address"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                <button
+                  onClick={handleConnectMetaMask}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-500/40 text-xs font-bold rounded-xl transition-all shadow-sm"
+                  title="Connect MetaMask wallet"
+                >
+                  <span>🦊 Connect</span>
+                </button>
+              </div>
+            )}
+
+            {/* Faucet Button */}
             <button
               onClick={handleClaimFaucet}
               disabled={isCallingRpc}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-950"
+              title="Claim 500 Test USDC on GenLayer"
             >
               <Coins className="w-3.5 h-3.5 text-emerald-400" />
               {isCallingRpc ? 'Broadcasting...' : '+500 Test USDC'}
             </button>
 
-            <div className="flex items-center gap-2 bg-[#121624] border border-[#222A42] px-3.5 py-2 rounded-xl">
+            {/* Vault Balance Display */}
+            <div className="flex items-center gap-2 bg-[#121624] border border-[#222A42] px-3.5 py-1.5 rounded-xl">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <div className="text-left font-mono text-xs">
-                <span className="text-slate-400 text-[10px] block leading-none">
+                <span className="text-slate-400 text-[9px] block leading-tight uppercase">
                   ON-CHAIN VAULT BALANCE
                 </span>
                 <span className="text-emerald-400 font-bold">${userUsdcBalance.toFixed(2)} USDC</span>
@@ -830,21 +938,33 @@ export default function PitwallDashboard() {
         
         {/* Real-Time Transaction Hash Banner (Appears when any tx is broadcast) */}
         {activeTxHash && (
-          <div className="bg-amber-950/40 border border-amber-500/50 rounded-2xl p-4 flex items-center justify-between gap-4">
+          <div className="bg-amber-950/40 border border-amber-500/50 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg shadow-amber-950/40">
             <div className="flex items-center gap-3">
               <Link2 className="w-5 h-5 text-amber-400 shrink-0 animate-spin" />
               <div className="text-xs font-mono">
-                <span className="text-amber-300 font-bold block">ACTIVE GENLAYER TRANSACTION BROADCAST:</span>
-                <span className="text-white break-all">{activeTxHash}</span>
+                <span className="text-amber-300 font-bold block flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                  ACTIVE GENLAYER TRANSACTION BROADCAST:
+                </span>
+                <a
+                  href="https://studio.genlayer.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-white hover:text-amber-300 underline font-bold break-all inline-flex items-center gap-1 mt-0.5"
+                  title="Open in GenLayer Studio Explorer"
+                >
+                  <span>{activeTxHash}</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-amber-400 shrink-0 inline" />
+                </a>
               </div>
             </div>
             <a
-              href={`https://studio.genlayer.com`}
+              href="https://studio.genlayer.com"
               target="_blank"
               rel="noreferrer"
-              className="text-[11px] font-mono text-amber-300 underline whitespace-nowrap hover:text-white"
+              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold rounded-xl transition-all flex items-center gap-1 shadow-md shrink-0"
             >
-              Explorer ↗
+              <span>Explore on Studio ↗</span>
             </a>
           </div>
         )}
@@ -1265,16 +1385,68 @@ export default function PitwallDashboard() {
                 <div className="flex items-center gap-2 text-rose-400 text-xs font-bold tracking-wider uppercase">
                   <Terminal className="w-4 h-4" /> Live GenLayer Consensus Kernel Stream
                 </div>
-                <div className="text-[11px] font-mono text-slate-400">
-                  Intelligent Contract: <code>{CONTRACT_ADDRESS.slice(0, 10)}...</code>
+                <div className="flex items-center gap-2 text-[11px] font-mono">
+                  <span className="text-slate-400">Intelligent Contract:</span>
+                  <a
+                    href="https://studio.genlayer.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-rose-400 hover:text-rose-300 font-bold underline flex items-center gap-1 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-600/30 transition-all"
+                    title="View on GenLayer Studio Explorer"
+                  >
+                    <code>{CONTRACT_ADDRESS.slice(0, 8)}...{CONTRACT_ADDRESS.slice(-4)}</code>
+                    <ExternalLink className="w-3 h-3 text-rose-400" />
+                  </a>
+                  <button
+                    onClick={() => {
+                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                        navigator.clipboard.writeText(CONTRACT_ADDRESS);
+                        addLog(`📋 Contract address copied: ${CONTRACT_ADDRESS}`);
+                      }
+                    }}
+                    className="p-1 text-slate-400 hover:text-white transition-colors"
+                    title="Copy Contract Address"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
                 </div>
               </div>
               <div className="h-44 overflow-y-auto space-y-1.5 font-mono text-xs text-slate-300 p-2">
-                {rpcLogs.map((log, idx) => (
-                  <div key={idx} className={log.includes('✓') ? 'text-emerald-400' : log.includes('🚨') ? 'text-rose-400' : log.includes('>>>') ? 'text-amber-300' : log.includes('⚡') ? 'text-amber-400 font-bold' : 'text-slate-300'}>
-                    {log}
-                  </div>
-                ))}
+                {rpcLogs.map((log, idx) => {
+                  const txMatch = log.match(/(0x[a-fA-F0-9]{64})/);
+                  const isSuccess = log.includes('✓');
+                  const isError = log.includes('🚨');
+                  const isRpc = log.includes('>>>');
+                  const isTx = log.includes('⚡');
+                  const colorClass = isSuccess ? 'text-emerald-400' : isError ? 'text-rose-400' : isRpc ? 'text-amber-300' : isTx ? 'text-amber-400 font-bold' : 'text-slate-300';
+                  
+                  if (txMatch) {
+                    const hash = txMatch[1];
+                    const parts = log.split(hash);
+                    return (
+                      <div key={idx} className={colorClass}>
+                        {parts[0]}
+                        <a
+                          href="https://studio.genlayer.com"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline text-amber-300 hover:text-white font-bold inline-flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-600/30"
+                          title="View on GenLayer Explorer"
+                        >
+                          {hash.slice(0, 10)}...{hash.slice(-6)}
+                          <ExternalLink className="w-2.5 h-2.5 inline text-amber-300" />
+                        </a>
+                        {parts[1]}
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div key={idx} className={colorClass}>
+                      {log}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
