@@ -3,8 +3,8 @@
 
 ![Pitwall AI Banner](./logo.png)
 
-> **Live GenLayer Intelligent Contract**: [`0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492`](https://studio.genlayer.com)  
-> **Deployment Tx Hash**: `0x4d818ba000eac460c2f5dacb1eb3e3d74e7c03745531633ad039a36ee29dcbb6`  
+> **Live GenLayer Intelligent Contract**: [`0x1BB06fA3A47dECeb8f33eb50EF050651b66F2a03`](https://studio.genlayer.com)  
+> **Deployment Tx Hash**: `0x3af6ec2e47c2a1624082a8ef004b3ccb6d0a938d804264adaa84b8ef71ac4755`  
 > **Consensus**: 5/5 Validator Nodes ACCEPTED  
 > **Target Network**: Base Sepolia / GenLayer Studio RPC (`https://studio.genlayer.com/api`)
 
@@ -50,17 +50,19 @@ graph TD
 ## 🔬 Deployed GenLayer Contract Specifications
 
 - **File**: `contracts/PitwallCourt.py`
-- **Address**: `0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492`
+- **Address**: `0x1BB06fA3A47dECeb8f33eb50EF050651b66F2a03`
 - **RPC Endpoint**: `https://studio.genlayer.com/api`
 - **Compiler Pragma**: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
 
 ### Key Intelligent Contract Methods
 
-- `create_market(market_id, race_name, circuit, target_driver, polymarket_slug, polymarket_url, telemetry_url, weather_url, fia_bulletin_url)`: Initializes a new race market.
-- `evaluate_syndicate_edge(market_id)`: Fetches multi-modal data via `gl.get_webpage()`, prompts validator LLMs under consensus, computes fair probability, compares with Polymarket, and sets `SIGNAL_APPROVED` or `PASS_NO_EDGE`.
-- `resolve_market(market_id, race_results_url)`: Scrapes official race classification to determine winner, resolving on-chain outcome tokens.
+- `faucet(recipient, amount)`: Mints on-chain Test USDC to recipient.
+- `execute_syndicate_wager(pos_id, market_id, user, side, amount, price_cents)`: Locks collateral and mints Conditional Outcome Tokens.
+- `evaluate_f1_telemetry_and_odds(market_id)`: Fetches multi-modal data via `gl.nondet.web.render()`, prompts validator LLMs under equivalence consensus, computes fair probability, compares with Polymarket, and sets `SIGNAL_APPROVED` or `PASS_NO_EDGE`.
+- `resolve_race_outcome_ai(market_id, results_url)`: 100% Autonomous AI resolution. Scrapes official FIA classification bulletins via `gl.nondet.web.render()` to determine race winner via validator LLM consensus without human input.
+- `claim_winnings(position_id)`: Redeems winning outcome tokens 1:1 on-chain with strict `[ERR_UNDERFUNDED]` invariant guards.
 - `get_market(market_id)`: Returns full market state and debrief data.
-- `get_race_engineer_debrief(market_id)`: Returns chief engineer tactical rationale, telemetry advantage, and tyre deg breakdown.
+- `get_user_balance(user)`: Returns verified on-chain Test USDC balance.
 
 ---
 

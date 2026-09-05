@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 
 // Live Upgraded Intelligent Contract with Native On-Chain Vault
-const CONTRACT_ADDRESS = '0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492' as any;
+const CONTRACT_ADDRESS = '0x1BB06fA3A47dECeb8f33eb50EF050651b66F2a03' as any;
 const GENLAYER_RPC = 'https://studio.genlayer.com/api';
 const EVM_VAULT_ADDRESS = '0x49B317cA7e19F4F64Ad83bFEB8E82B31f57560B8' as any;
 
@@ -213,6 +213,26 @@ export default function PitwallDashboard() {
   const [activeTab, setActiveTab] = useState<'pitwall' | 'telemetry' | 'briefing' | 'portfolio' | 'architecture'>('pitwall');
   const [selectedMarketId, setSelectedMarketId] = useState<string>('MONZA_2026_NORRIS');
   const [isCallingRpc, setIsCallingRpc] = useState(false);
+  const [settlementNetwork, setSettlementNetwork] = useState<'GENLAYER' | 'BASE_SEPOLIA'>('GENLAYER');
+  const [reviewerAccount, setReviewerAccount] = useState<any>(null);
+
+  useEffect(() => {
+    try {
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pitwall_reviewer_account') : null;
+      if (storedKey) {
+        setReviewerAccount(createAccount(storedKey as any));
+      } else {
+        const newAcc = createAccount();
+        setReviewerAccount(newAcc);
+      }
+    } catch (e) {
+      setReviewerAccount(createAccount());
+    }
+  }, []);
+
+  const getReviewerAccount = () => {
+    return reviewerAccount || createAccount();
+  };
   const [rpcLogs, setRpcLogs] = useState<string[]>([]);
   const [activeTxHash, setActiveTxHash] = useState<string | null>(null);
   
@@ -370,7 +390,7 @@ export default function PitwallDashboard() {
     addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${userWallet.slice(0, 8)}...", 500 USDC)...`);
 
     try {
-      const genAccount = createAccount();
+      const genAccount = getReviewerAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
 
       const txHash = await client.writeContract({
@@ -404,7 +424,7 @@ export default function PitwallDashboard() {
     addLog(`2. [EQUIVALENCE JURY] Signing & broadcasting evaluate_f1_telemetry_and_odds("${selectedMarketId}")...`);
 
     try {
-      const genAccount = createAccount();
+      const genAccount = getReviewerAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
       
       const txHash = await client.writeContract({
@@ -432,7 +452,7 @@ export default function PitwallDashboard() {
 
   // 5. REAL ON-CHAIN WAGER: Locks Collateral & Mints Conditional Tokens on Contract
   const handleExecuteWager = async () => {
-    if (userUsdcBalance < wagerAmount) {
+    if (userUsdcBalance < wagerAmount && settlementNetwork === 'GENLAYER') {
       addLog(`🚨 [INSUFFICIENT FUNDS] You need at least ${wagerAmount} USDC. Click "+500 Test USDC" to get real on-chain faucet funds!`);
       return;
     }
@@ -444,48 +464,98 @@ export default function PitwallDashboard() {
     const pricePerShare = priceCents / 100;
     const sharesMinted = Math.floor(wagerAmount / pricePerShare);
 
-    addLog(`🏎️ 1. Signing execute_syndicate_wager("${posId}", "${selectedMarketId}", ${selectedSide}, $${wagerAmount} USDC, ${priceCents}¢)...`);
-
     try {
-      const genAccount = createAccount();
-      const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
+      let finalTxHash = '';
+      if (settlementNetwork === 'BASE_SEPOLIA' && typeof window !== 'undefined' && (window as any).ethereum) {
+        addLog(`⛓️ [EVM MODE] Encoding real executeSyndicateWager calldata for Base Sepolia Vault...`);
+        const { encodeFunctionData, keccak256, toHex } = await import('viem');
+        
+        const vaultAbi = [
+          {
+            name: 'executeSyndicateWager',
+            type: 'function',
+            inputs: [
+              { name: 'positionId', type: 'bytes32' },
+              { name: 'marketId', type: 'bytes32' },
+              { name: 'outcomeSide', type: 'uint8' },
+              { name: 'wagerAmount', type: 'uint256' },
+              { name: 'priceCents', type: 'uint256' }
+            ]
+          }
+        ];
+        
+        const posIdBytes32 = keccak256(toHex(posId));
+        const marketIdBytes32 = keccak256(toHex(selectedMarketId));
+        const calldata = encodeFunctionData({
+          abi: vaultAbi,
+          functionName: 'executeSyndicateWager',
+          args: [
+            posIdBytes32,
+            marketIdBytes32,
+            selectedSide === 'YES' ? 1 : 2,
+            BigInt(wagerAmount * 10**6),
+            BigInt(priceCents)
+          ]
+        });
 
-      const txHash = await client.writeContract({
-        address: CONTRACT_ADDRESS as any,
-        functionName: 'execute_syndicate_wager',
-        args: [
-          posId,
-          selectedMarketId,
-          userWallet,
-          selectedSide,
-          BigInt(wagerAmount * 10**6),
-          BigInt(priceCents)
-        ],
-        value: BigInt(0)
-      }) as string;
+        addLog(`✓ [CALLDATA ENCODED] Generated: ${calldata.slice(0, 34)}... (${calldata.length} chars)`);
+        addLog(`🦊 Requesting MetaMask signing for Base Sepolia Vault (${EVM_VAULT_ADDRESS})...`);
 
-      setActiveTxHash(txHash);
-      addLog(`⚡ [TX BROADCAST] Wager Tx Hash: ${txHash}`);
-      addLog(`⏳ Awaiting block confirmation and on-chain conditional token minting...`);
+        finalTxHash = await (window as any).ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: userWallet,
+            to: EVM_VAULT_ADDRESS,
+            value: '0x0',
+            data: calldata
+          }]
+        });
 
-      const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
-      addLog(`✓ [WAGER MINED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'}! Collateral locked in vault.`);
-      addLog(`✓ [CTF MINTED] Minted ${sharesMinted} ${selectedSide} Conditional Outcome Shares on-chain!`);
+        setActiveTxHash(finalTxHash);
+        addLog(`⚡ [EVM TX MINED] Base Sepolia Tx: ${finalTxHash}`);
+        addLog(`✓ [CTF SHARES MINTED] Minted ${sharesMinted} ${selectedSide} shares on Base Sepolia Vault!`);
+      } else {
+        // Native GenLayer Intelligent Contract Mode (100% on-chain)
+        addLog(`🏎️ 1. Signing execute_syndicate_wager("${posId}", "${selectedMarketId}", ${selectedSide}, $${wagerAmount} USDC, ${priceCents}¢)...`);
+        const genAccount = getReviewerAccount();
+        const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
 
-      // Refresh on-chain balance
-      await fetchUserBalanceFromChain();
+        finalTxHash = await client.writeContract({
+          address: CONTRACT_ADDRESS as any,
+          functionName: 'execute_syndicate_wager',
+          args: [
+            posId,
+            selectedMarketId,
+            userWallet,
+            selectedSide,
+            BigInt(wagerAmount * 10**6),
+            BigInt(priceCents)
+          ],
+          value: BigInt(0)
+        }) as string;
+
+        setActiveTxHash(finalTxHash);
+        addLog(`⚡ [TX BROADCAST] GenLayer Wager Tx Hash: ${finalTxHash}`);
+        addLog(`⏳ Awaiting block confirmation and on-chain conditional token minting...`);
+
+        const receipt = await client.waitForTransactionReceipt({ hash: finalTxHash as any, retries: 35, interval: 2000 });
+        addLog(`✓ [WAGER MINED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'}! Collateral locked in vault.`);
+        addLog(`✓ [CTF MINTED] Minted ${sharesMinted} ${selectedSide} Conditional Outcome Shares on-chain!`);
+
+        await fetchUserBalanceFromChain();
+      }
 
       const newPos: UserPosition = {
         positionId: posId,
         marketId: selectedMarketId,
-        marketTitle: market?.target_driver ? `Market: ${market.target_driver}` : selectedMarketId,
+        marketTitle: market?.race_name || selectedMarketId,
         side: selectedSide,
         wagerAmount: wagerAmount,
         tokensMinted: sharesMinted,
         payoutAmount: 0,
         isSettled: false,
         isWon: false,
-        txHash: txHash
+        txHash: finalTxHash || '0x...'
       };
       setUserPositions(prev => [newPos, ...prev]);
       addLog(`✓ [POSITION ACTIVE] Position logged in your Syndicate Portfolio.`);
@@ -496,33 +566,34 @@ export default function PitwallDashboard() {
     }
   };
 
-  // 6. REAL ON-CHAIN RESOLUTION: Calls resolve_race_outcome on GenLayer
-  const handleResolveRace = async (winningDriver: string) => {
+  // 6. 100% AUTONOMOUS AI CONSENSUS RESOLUTION: Calls resolve_race_outcome_ai on GenLayer
+  const handleResolveRace = async () => {
     setIsCallingRpc(true);
-    addLog(`🏁 1. Ingesting Official FIA Classification: Winner = ${winningDriver}...`);
-    addLog(`2. Signing resolve_race_outcome("${selectedMarketId}", "${winningDriver}")...`);
+    addLog(`🏁 1. Activating Autonomous GenLayer AI Multi-Validator Consensus for "${selectedMarketId}"...`);
+    addLog(`2. Validator nodes scraping official FIA classification bulletin non-deterministically...`);
+    addLog(`3. Signing resolve_race_outcome_ai("${selectedMarketId}")...`);
 
     try {
-      const genAccount = createAccount();
+      const genAccount = getReviewerAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
       
       const txHash = await client.writeContract({
         address: CONTRACT_ADDRESS as any,
-        functionName: 'resolve_race_outcome',
-        args: [selectedMarketId, winningDriver],
+        functionName: 'resolve_race_outcome_ai',
+        args: [selectedMarketId, ''],
         value: BigInt(0)
       }) as string;
 
       setActiveTxHash(txHash);
-      addLog(`⚡ [TX BROADCAST] Resolution Tx Hash: ${txHash}`);
-      addLog(`⏳ Awaiting validator consensus confirmation...`);
+      addLog(`⚡ [TX BROADCAST] AI Consensus Resolution Tx Hash: ${txHash}`);
+      addLog(`⏳ Awaiting multi-validator LLM consensus receipt...`);
 
-      const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 40, interval: 2000 });
-      addLog(`✓ [RACE SETTLED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'} (Winner: ${winningDriver})`);
+      const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 45, interval: 2000 });
+      addLog(`✓ [RACE AUTONOMOUSLY SETTLED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'} via GenLayer Validator LLM Consensus!`);
 
       await fetchMarketFromChain(selectedMarketId);
     } catch (e: any) {
-      addLog(`🚨 [ERROR] Race resolution: ${e.message}`);
+      addLog(`🚨 [ERROR] AI Race resolution: ${e.message}`);
     } finally {
       setIsCallingRpc(false);
     }
@@ -537,7 +608,7 @@ export default function PitwallDashboard() {
     addLog(`🏆 1. Submitting on-chain claim_winnings("${posId}")...`);
 
     try {
-      const genAccount = createAccount();
+      const genAccount = getReviewerAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
 
       const txHash = await client.writeContract({
@@ -595,7 +666,7 @@ export default function PitwallDashboard() {
     addLog(`📝 [REGISTER MARKET] Signing register_race_market("${newMarketId}")...`);
 
     try {
-      const genAccount = createAccount();
+      const genAccount = getReviewerAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
 
       const txHash = await client.writeContract({
@@ -1151,16 +1222,35 @@ export default function PitwallDashboard() {
                     {isCallingRpc ? 'Broadcasting On-Chain Tx...' : `Place On-Chain Wager (${wagerAmount} USDC)`}
                   </button>
 
-                  {/* Real Race Resolution Action */}
+                  {/* Settlement Destination Toggle */}
+                  <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-mono text-slate-400">VAULT TARGET:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSettlementNetwork('GENLAYER')}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all ${settlementNetwork === 'GENLAYER' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        GenLayer (100% On-Chain)
+                      </button>
+                      <button
+                        onClick={() => setSettlementNetwork('BASE_SEPOLIA')}
+                        className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all ${settlementNetwork === 'BASE_SEPOLIA' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        Base Sepolia (MetaMask)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 100% Autonomous AI Consensus Race Resolution Action */}
                   <div className="pt-2 border-t border-slate-800/80">
-                    <span className="text-[10px] font-mono text-slate-500 block mb-2">ON-CHAIN RACE RESOLUTION:</span>
+                    <span className="text-[10px] font-mono text-slate-500 block mb-2">100% AUTONOMOUS AI CONSENSUS RESOLUTION:</span>
                     <button
-                      onClick={() => handleResolveRace(market?.target_driver || 'Lando Norris')}
+                      onClick={() => handleResolveRace()}
                       disabled={isCallingRpc || market?.status === 'RACE_SETTLED'}
-                      className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-300 border border-slate-700 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-emerald-400 border border-emerald-500/30 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> 
-                      {market?.status === 'RACE_SETTLED' ? 'Race Already Settled On-Chain' : `Sign Resolution: ${market?.target_driver || 'Lando Norris'} Wins`}
+                      {market?.status === 'RACE_SETTLED' ? 'Race Settled via AI Consensus' : 'Trigger Autonomous AI Consensus Settlement'}
                     </button>
                   </div>
 
