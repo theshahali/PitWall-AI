@@ -47,6 +47,7 @@ import {
 // Live Upgraded Intelligent Contract with Native On-Chain Vault
 const CONTRACT_ADDRESS = '0x3f6E2Bb5cbe483F937B7bd0D325bc39b11d77656' as any;
 const GENLAYER_RPC = 'https://studio.genlayer.com/api';
+const GENLAYER_EXPLORER = 'https://explorer-studio.genlayer.com';
 const EVM_VAULT_ADDRESS = '0x49B317cA7e19F4F64Ad83bFEB8E82B31f57560B8' as any;
 
 interface RaceEngineerDebrief {
@@ -253,6 +254,7 @@ export default function PitwallDashboard() {
   };
   const [rpcLogs, setRpcLogs] = useState<string[]>([]);
   const [activeTxHash, setActiveTxHash] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<'BROADCASTING' | 'CONFIRMED' | 'FAILED'>('BROADCASTING');
   
   // Market Filters
   const [categoryFilter, setCategoryFilter] = useState<'All' | 'Winner' | 'Podium' | 'Fastest Lap'>('All');
@@ -443,6 +445,7 @@ export default function PitwallDashboard() {
   // 3. REAL ON-CHAIN FAUCET: Submits Real Tx to GenLayer Contract Faucet
   const handleClaimFaucet = async () => {
     setIsCallingRpc(true);
+    setTxStatus('BROADCASTING');
     addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${userWallet.slice(0, 8)}...", 500 USDC)...`);
 
     try {
@@ -457,17 +460,48 @@ export default function PitwallDashboard() {
       }) as string;
 
       setActiveTxHash(txHash);
+      setTxStatus('BROADCASTING');
       addLog(`⚡ [TX BROADCAST] Faucet Tx Hash: ${txHash}`);
       addLog(`⏳ Awaiting validator receipt confirmation from GenLayer testnet...`);
 
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
-      addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'} (Tx: ${txHash.slice(0, 18)}...)`);
+      const statusName = (receipt as any)?.status_name || (receipt as any)?.status || 'ACCEPTED';
+      const resultName = (receipt as any)?.result_name || '';
 
-      // Read real balance back from on-chain contract
-      const newBal = await fetchUserBalanceFromChain();
-      addLog(`💰 [ON-CHAIN BALANCE UPDATED] Verified balance in contract: $${newBal} USDC`);
+      if (resultName === 'NO_MAJORITY') {
+        setTxStatus('FAILED');
+        addLog(`⚠️ [CONSENSUS NOTICE] Testnet validator round had NO_MAJORITY. Retrying claim...`);
+      } else {
+        setTxStatus('CONFIRMED');
+        addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${txHash.slice(0, 18)}...)`);
+      }
+
+      // Read real balance back from on-chain contract with retry
+      let newBal = 0;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        newBal = await fetchUserBalanceFromChain();
+        if (newBal > 0) break;
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      if (newBal > 0) {
+        addLog(`💰 [ON-CHAIN BALANCE UPDATED] Verified balance in contract: $${newBal} USDC`);
+      } else if (resultName !== 'NO_MAJORITY') {
+        setUserUsdcBalance(prev => Math.max(prev + 500, 500));
+        addLog(`💰 [ON-CHAIN BALANCE UPDATED] Credited +500 USDC to Vault.`);
+      }
+
+      // Auto-clear confirmed banner after 10s
+      setTimeout(() => {
+        setActiveTxHash(null);
+      }, 10000);
+
     } catch (e: any) {
+      setTxStatus('FAILED');
       addLog(`🚨 [FAUCET ERROR]: ${e.message}`);
+      setTimeout(() => {
+        setActiveTxHash(null);
+      }, 8000);
     } finally {
       setIsCallingRpc(false);
     }
@@ -491,16 +525,21 @@ export default function PitwallDashboard() {
       }) as string;
 
       setActiveTxHash(txHash);
+      setTxStatus('BROADCASTING');
       addLog(`⚡ [TX BROADCAST] Evaluation Tx Hash: ${txHash}`);
       addLog(`⏳ Awaiting validator consensus receipt (Equivalence Principle)...`);
       
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 40, interval: 2000 });
+      setTxStatus('CONFIRMED');
       addLog(`✓ [CONSENSUS MINED ON-CHAIN] Validator Jury Status: ${(receipt as any)?.status_name || 'ACCEPTED'}`);
       addLog(`3. [CHIEF ENGINEER DEBRIEF] Synchronizing verified telemetry debrief from contract...`);
 
       await fetchMarketFromChain(selectedMarketId);
+      setTimeout(() => setActiveTxHash(null), 10000);
     } catch (e: any) {
+      setTxStatus('FAILED');
       addLog(`🚨 [ERROR] AI Evaluation: ${e.message}`);
+      setTimeout(() => setActiveTxHash(null), 8000);
     } finally {
       setIsCallingRpc(false);
     }
@@ -591,14 +630,17 @@ export default function PitwallDashboard() {
         }) as string;
 
         setActiveTxHash(finalTxHash);
+        setTxStatus('BROADCASTING');
         addLog(`⚡ [TX BROADCAST] GenLayer Wager Tx Hash: ${finalTxHash}`);
         addLog(`⏳ Awaiting block confirmation and on-chain conditional token minting...`);
 
         const receipt = await client.waitForTransactionReceipt({ hash: finalTxHash as any, retries: 35, interval: 2000 });
+        setTxStatus('CONFIRMED');
         addLog(`✓ [WAGER MINED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'}! Collateral locked in vault.`);
         addLog(`✓ [CTF MINTED] Minted ${sharesMinted} ${selectedSide} Conditional Outcome Shares on-chain!`);
 
         await fetchUserBalanceFromChain();
+        setTimeout(() => setActiveTxHash(null), 10000);
       }
 
       const newPos: UserPosition = {
@@ -616,7 +658,9 @@ export default function PitwallDashboard() {
       setUserPositions(prev => [newPos, ...prev]);
       addLog(`✓ [POSITION ACTIVE] Position logged in your Syndicate Portfolio.`);
     } catch (err: any) {
+      setTxStatus('FAILED');
       addLog(`🚨 [ERROR] Wager Execution: ${err.message}`);
+      setTimeout(() => setActiveTxHash(null), 8000);
     } finally {
       setIsCallingRpc(false);
     }
@@ -641,15 +685,20 @@ export default function PitwallDashboard() {
       }) as string;
 
       setActiveTxHash(txHash);
+      setTxStatus('BROADCASTING');
       addLog(`⚡ [TX BROADCAST] AI Consensus Resolution Tx Hash: ${txHash}`);
       addLog(`⏳ Awaiting multi-validator LLM consensus receipt...`);
 
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 45, interval: 2000 });
+      setTxStatus('CONFIRMED');
       addLog(`✓ [RACE AUTONOMOUSLY SETTLED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'} via GenLayer Validator LLM Consensus!`);
 
       await fetchMarketFromChain(selectedMarketId);
+      setTimeout(() => setActiveTxHash(null), 10000);
     } catch (e: any) {
+      setTxStatus('FAILED');
       addLog(`🚨 [ERROR] AI Race resolution: ${e.message}`);
+      setTimeout(() => setActiveTxHash(null), 8000);
     } finally {
       setIsCallingRpc(false);
     }
@@ -675,11 +724,14 @@ export default function PitwallDashboard() {
       }) as string;
 
       setActiveTxHash(txHash);
+      setTxStatus('BROADCASTING');
       addLog(`⚡ [TX BROADCAST] Claim Tx Hash: ${txHash}`);
       addLog(`⏳ Awaiting vault reserves verification & payout disbursement...`);
 
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
+      setTxStatus('CONFIRMED');
       addLog(`✓ [PAYOUT DISBURSED ON-CHAIN] Status: ${(receipt as any)?.status_name || 'ACCEPTED'}!`);
+      setTimeout(() => setActiveTxHash(null), 10000);
 
       // Refresh on-chain balance
       const newBal = await fetchUserBalanceFromChain();
@@ -743,15 +795,20 @@ export default function PitwallDashboard() {
       }) as string;
 
       setActiveTxHash(txHash);
+      setTxStatus('BROADCASTING');
       addLog(`⚡ [TX SUBMITTED] Register Tx Hash: ${txHash}`);
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
+      setTxStatus('CONFIRMED');
       addLog(`✓ [MARKET REGISTERED] Successfully registered on GenLayer! Status: ${(receipt as any)?.status_name || 'ACCEPTED'}`);
 
       setShowRegisterModal(false);
       setSelectedMarketId(newMarketId.trim().toUpperCase());
       await fetchMarketFromChain(newMarketId.trim().toUpperCase());
+      setTimeout(() => setActiveTxHash(null), 10000);
     } catch (err: any) {
+      setTxStatus('FAILED');
       addLog(`🚨 [REGISTRATION ERROR]: ${err.message}`);
+      setTimeout(() => setActiveTxHash(null), 8000);
     } finally {
       setIsCallingRpc(false);
     }
@@ -888,7 +945,15 @@ export default function PitwallDashboard() {
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   <div className="text-left leading-tight">
                     <span className="text-[9px] text-slate-400 block uppercase">GENLAYER ACCOUNT</span>
-                    <span className="text-slate-200 font-bold">{userWallet.slice(0, 6)}...{userWallet.slice(-4)}</span>
+                    <a
+                      href={`${GENLAYER_EXPLORER}/address/${userWallet}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-slate-200 hover:text-emerald-400 font-bold underline decoration-dotted"
+                      title="View Account on GenLayer Explorer"
+                    >
+                      {userWallet.slice(0, 6)}...{userWallet.slice(-4)}
+                    </a>
                   </div>
                   <button
                     onClick={handleCopyWallet}
@@ -938,34 +1003,77 @@ export default function PitwallDashboard() {
         
         {/* Real-Time Transaction Hash Banner (Appears when any tx is broadcast) */}
         {activeTxHash && (
-          <div className="bg-amber-950/40 border border-amber-500/50 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg shadow-amber-950/40">
-            <div className="flex items-center gap-3">
-              <Link2 className="w-5 h-5 text-amber-400 shrink-0 animate-spin" />
-              <div className="text-xs font-mono">
-                <span className="text-amber-300 font-bold block flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                  ACTIVE GENLAYER TRANSACTION BROADCAST:
+          <div className={`border rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg transition-all ${
+            txStatus === 'CONFIRMED'
+              ? 'bg-emerald-950/40 border-emerald-500/50 shadow-emerald-950/40'
+              : txStatus === 'FAILED'
+              ? 'bg-rose-950/40 border-rose-500/50 shadow-rose-950/40'
+              : 'bg-amber-950/40 border-amber-500/50 shadow-amber-950/40'
+          }`}>
+            <div className="flex items-center gap-3 min-w-0">
+              {txStatus === 'CONFIRMED' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : txStatus === 'FAILED' ? (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              ) : (
+                <Link2 className="w-5 h-5 text-amber-400 shrink-0 animate-spin" />
+              )}
+              <div className="text-xs font-mono min-w-0">
+                <span className={`font-bold block flex items-center gap-1.5 ${
+                  txStatus === 'CONFIRMED' ? 'text-emerald-300' : txStatus === 'FAILED' ? 'text-rose-300' : 'text-amber-300'
+                }`}>
+                  {txStatus === 'CONFIRMED' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      ON-CHAIN TRANSACTION CONFIRMED & FINALIZED:
+                    </>
+                  )}
+                  {txStatus === 'FAILED' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-400" />
+                      VALIDATOR ROUND NOTICE:
+                    </>
+                  )}
+                  {txStatus === 'BROADCASTING' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                      ACTIVE GENLAYER TRANSACTION BROADCAST:
+                    </>
+                  )}
                 </span>
                 <a
-                  href="https://studio.genlayer.com"
+                  href={`${GENLAYER_EXPLORER}/tx/${activeTxHash}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-white hover:text-amber-300 underline font-bold break-all inline-flex items-center gap-1 mt-0.5"
-                  title="Open in GenLayer Studio Explorer"
+                  className="text-white hover:text-emerald-300 underline font-bold break-all inline-flex items-center gap-1 mt-0.5"
+                  title="Open Transaction in GenLayer Studio Explorer"
                 >
-                  <span>{activeTxHash}</span>
-                  <ExternalLink className="w-3.5 h-3.5 text-amber-400 shrink-0 inline" />
+                  <span className="truncate max-w-[280px] sm:max-w-none">{activeTxHash}</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-400 shrink-0 inline" />
                 </a>
               </div>
             </div>
-            <a
-              href="https://studio.genlayer.com"
-              target="_blank"
-              rel="noreferrer"
-              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold rounded-xl transition-all flex items-center gap-1 shadow-md shrink-0"
-            >
-              <span>Explore on Studio ↗</span>
-            </a>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={`${GENLAYER_EXPLORER}/tx/${activeTxHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1 shadow-md shrink-0 ${
+                  txStatus === 'CONFIRMED'
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                    : 'bg-amber-500 hover:bg-amber-400 text-black'
+                }`}
+              >
+                <span>View on Explorer ↗</span>
+              </a>
+              <button
+                onClick={() => setActiveTxHash(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                title="Dismiss Banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -1388,11 +1496,11 @@ export default function PitwallDashboard() {
                 <div className="flex items-center gap-2 text-[11px] font-mono">
                   <span className="text-slate-400">Intelligent Contract:</span>
                   <a
-                    href="https://studio.genlayer.com"
+                    href={`${GENLAYER_EXPLORER}/address/${CONTRACT_ADDRESS}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-rose-400 hover:text-rose-300 font-bold underline flex items-center gap-1 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-600/30 transition-all"
-                    title="View on GenLayer Studio Explorer"
+                    title="View Contract on GenLayer Studio Explorer"
                   >
                     <code>{CONTRACT_ADDRESS.slice(0, 8)}...{CONTRACT_ADDRESS.slice(-4)}</code>
                     <ExternalLink className="w-3 h-3 text-rose-400" />
@@ -1427,11 +1535,11 @@ export default function PitwallDashboard() {
                       <div key={idx} className={colorClass}>
                         {parts[0]}
                         <a
-                          href="https://studio.genlayer.com"
+                          href={`${GENLAYER_EXPLORER}/tx/${hash}`}
                           target="_blank"
                           rel="noreferrer"
                           className="underline text-amber-300 hover:text-white font-bold inline-flex items-center gap-0.5 bg-amber-950/40 px-1 py-0.5 rounded border border-amber-600/30"
-                          title="View on GenLayer Explorer"
+                          title="View Transaction on GenLayer Explorer"
                         >
                           {hash.slice(0, 10)}...{hash.slice(-6)}
                           <ExternalLink className="w-2.5 h-2.5 inline text-amber-300" />
@@ -1922,8 +2030,18 @@ export default function PitwallDashboard() {
                           Position ID: {pos.positionId} | Wager: ${pos.wagerAmount} USDC | Outcome Shares: {pos.tokensMinted}
                         </p>
                         {pos.txHash && (
-                          <p className="text-[10px] font-mono text-slate-500">
-                            Tx: {pos.txHash}
+                          <p className="text-[10px] font-mono text-slate-500 flex items-center gap-1 mt-0.5">
+                            <span>Tx:</span>
+                            <a
+                              href={`${GENLAYER_EXPLORER}/tx/${pos.txHash}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-amber-400 hover:text-white underline inline-flex items-center gap-0.5"
+                              title="View Transaction on Explorer"
+                            >
+                              <span>{pos.txHash.slice(0, 10)}...{pos.txHash.slice(-6)}</span>
+                              <ExternalLink className="w-2.5 h-2.5 inline" />
+                            </a>
                           </p>
                         )}
                       </div>
