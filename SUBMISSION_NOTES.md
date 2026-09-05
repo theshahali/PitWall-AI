@@ -1,7 +1,7 @@
-Pitwall AI is an autonomous on-chain Formula 1 prediction market syndicate powered by GenLayer's GenVM. It continuously ingests real-world Polymarket odds benchmarks alongside telemetry sector splits, weather radar, and FIA penalty bulletins. Using GenLayer multi-validator LLM consensus, Pitwall AI evaluates edge probabilities and executes wagers via a Gnosis Conditional Token vault on Base Sepolia.
+Pitwall AI is an autonomous on-chain Formula 1 prediction syndicate powered by GenLayer GenVM. It ingests live Polymarket odds, telemetry micro-splits, weather radar, and FIA penalty bulletins. Using GenLayer multi-validator LLM consensus, it computes fair win probabilities, identifies alpha edges, locks collateral, and executes conditional wagers with zero mock data.
 
 HIGHLIGHTS FOR REVIEWERS:
-1. Live GenLayer Contract: 0x7d84D93C1db63BD67fCd460Dae6f708769aD0c06 deployed on GenLayer Studio RPC.
-2. Web Scraping & Multi-Validator Consensus: Parses raw telemetry HTML and Polymarket data non-deterministically, reaching deterministic consensus on fair win probability and alpha edge.
-3. Reviewer-Friendly: 100% testnet. Built-in Test USDC faucet & 1-click Reviewer Sandbox mode for instant verification with zero funds needed.
-4. Gnosis CTF Vault: Audited conditional tokens framework with mathematical underfunding guards.
+1. Live GenLayer Contract: 0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492 on GenLayer Studio RPC (Tx: 0x4d818ba000eac460c2f5dacb1eb3e3d74e7c03745531633ad039a36ee29dcbb6).
+2. 100% Real On-Chain Execution: Every faucet mint, syndicate wager, race resolution, and winnings claim broadcasts a real transaction awaiting mined receipts on GenLayer.
+3. Multi-Market Predictions: Multiple Polymarket F1 bets (Winner, Podium, Fastest Lap across Monza, Spa, Silverstone).
+4. Dual Settlement: Native GenLayer Syndicate Vault + EVM Gnosis CTF Vault with [ERR_UNDERFUNDED] invariant guards.

@@ -3,8 +3,8 @@
 
 ![Pitwall AI Banner](./logo.png)
 
-> **Live GenLayer Intelligent Contract**: [`0x7d84D93C1db63BD67fCd460Dae6f708769aD0c06`](https://studio.genlayer.com)  
-> **Deployment Tx Hash**: `0x0a9554e5fc1809920599af31df5c2ca8c2f86597a896941b44a9a95507a083be`  
+> **Live GenLayer Intelligent Contract**: [`0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492`](https://studio.genlayer.com)  
+> **Deployment Tx Hash**: `0x4d818ba000eac460c2f5dacb1eb3e3d74e7c03745531633ad039a36ee29dcbb6`  
 > **Consensus**: 5/5 Validator Nodes ACCEPTED  
 > **Target Network**: Base Sepolia / GenLayer Studio RPC (`https://studio.genlayer.com/api`)
 
@@ -50,7 +50,7 @@ graph TD
 ## 🔬 Deployed GenLayer Contract Specifications
 
 - **File**: `contracts/PitwallCourt.py`
-- **Address**: `0x7d84D93C1db63BD67fCd460Dae6f708769aD0c06`
+- **Address**: `0x24083d52dcCC9CC21A9aE84a5861B2Ac33b5D492`
 - **RPC Endpoint**: `https://studio.genlayer.com/api`
 - **Compiler Pragma**: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
 
