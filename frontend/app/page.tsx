@@ -374,7 +374,8 @@ export default function PitwallDashboard() {
         functionName: 'get_user_balance',
         args: [target]
       }) as any;
-      const balNum = Number(rawBal) / 10**6;
+      const rawNum = Number(rawBal);
+      const balNum = rawNum >= 10**6 ? (rawNum / 10**6) : (rawNum > 0 ? 0 : 0);
       setUserUsdcBalance(balNum);
       return balNum;
     } catch (e) {
@@ -464,37 +465,40 @@ export default function PitwallDashboard() {
     addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${userWallet.slice(0, 8)}...", 500 USDC)...`);
 
     try {
-      const genAccount = getReviewerAccount();
-      const client = createClient({ endpoint: GENLAYER_RPC, account: genAccount });
+      // Always generate a fresh signer account to guarantee unique nonce & avoid testnet transaction deduplication
+      const faucetSigner = createAccount();
+      const client = createClient({ endpoint: GENLAYER_RPC, account: faucetSigner });
 
-      const txHash = await client.writeContract({
+      let finalTx = await client.writeContract({
         address: CONTRACT_ADDRESS as any,
         functionName: 'faucet',
-        args: [userWallet, 500000000],
+        args: [userWallet.trim().toLowerCase(), 500000000],
         value: 0
       }) as string;
 
-      setActiveTxHash(txHash);
+      setActiveTxHash(finalTx);
       setTxStatus('BROADCASTING');
-      addLog(`⚡ [TX BROADCAST] Faucet Tx Hash: ${txHash}`);
-      addLog(`⏳ Awaiting validator receipt confirmation from GenLayer testnet...`);
+      addLog(`⚡ [TX BROADCAST] Faucet Tx Hash: ${finalTx}`);
+      addLog(`⏳ Awaiting validator consensus from GenLayer testnet...`);
 
-      let receipt: any = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
+      let receipt: any = await client.waitForTransactionReceipt({ hash: finalTx as any, retries: 35, interval: 2000 });
       let statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
       let resultName = receipt?.result_name || '';
 
-      // Automatic retry if testnet validator slot experienced transient NO_MAJORITY
+      // Automatic retry with fresh signer if testnet validator slot experienced transient NO_MAJORITY
       if (resultName === 'NO_MAJORITY') {
-        addLog(`⚠️ [CONSENSUS NOTICE] Validator slot had NO_MAJORITY. Auto-retrying round 2...`);
-        const retryTxHash = await client.writeContract({
+        addLog(`⚠️ [CONSENSUS NOTICE] Slot had NO_MAJORITY. Auto-dispatching fresh round 2...`);
+        const retrySigner = createAccount();
+        const retryClient = createClient({ endpoint: GENLAYER_RPC, account: retrySigner });
+        finalTx = await retryClient.writeContract({
           address: CONTRACT_ADDRESS as any,
           functionName: 'faucet',
-          args: [userWallet, 500000000],
+          args: [userWallet.trim().toLowerCase(), 500000000],
           value: 0
         }) as string;
-        setActiveTxHash(retryTxHash);
-        addLog(`⚡ [RETRY TX BROADCAST] Faucet Retry Tx Hash: ${retryTxHash}`);
-        receipt = await client.waitForTransactionReceipt({ hash: retryTxHash as any, retries: 35, interval: 2000 });
+        setActiveTxHash(finalTx);
+        addLog(`⚡ [RETRY TX BROADCAST] Faucet Retry Tx Hash: ${finalTx}`);
+        receipt = await retryClient.waitForTransactionReceipt({ hash: finalTx as any, retries: 35, interval: 2000 });
         resultName = receipt?.result_name || '';
         statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
       }
@@ -504,19 +508,19 @@ export default function PitwallDashboard() {
         addLog(`⚠️ [CONSENSUS NOTICE] Testnet validator slot unresolved. Click again to retry.`);
       } else {
         setTxStatus('CONFIRMED');
-        addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${txHash.slice(0, 18)}...)`);
+        addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${finalTx.slice(0, 18)}...)`);
       }
 
       // Read real balance back from on-chain contract with retry
       let newBal = 0;
       for (let attempt = 0; attempt < 4; attempt++) {
         newBal = await fetchUserBalanceFromChain(userWallet);
-        if (newBal > 0) break;
+        if (newBal >= 500) break;
         await new Promise(r => setTimeout(r, 1200));
       }
 
       if (newBal > 0) {
-        addLog(`💰 [ON-CHAIN BALANCE UPDATED] Verified balance in contract: $${newBal} USDC`);
+        addLog(`💰 [ON-CHAIN BALANCE UPDATED] Verified balance in contract: $${newBal.toFixed(2)} USDC`);
       } else if (resultName !== 'NO_MAJORITY') {
         setUserUsdcBalance(prev => Math.max(prev + 500, 500));
         addLog(`💰 [ON-CHAIN BALANCE UPDATED] Credited +500 USDC to Vault.`);
