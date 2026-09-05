@@ -120,7 +120,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 55,
     edge: 17,
     status: 'SIGNAL_APPROVED',
-    rec: 'BUY_YES'
+    rec: 'BUY_YES',
+    polyUrl: 'https://polymarket.com/event/italian-grand-prix-winner-2026'
   },
   {
     id: 'MONZA_2026_LECLERC_PODIUM',
@@ -135,7 +136,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 30,
     edge: 13,
     status: 'SIGNAL_APPROVED',
-    rec: 'BUY_YES'
+    rec: 'BUY_YES',
+    polyUrl: 'https://polymarket.com/event/italian-gp-charles-leclerc-podium'
   },
   {
     id: 'MONZA_2026_VERSTAPPEN_WIN',
@@ -150,7 +152,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 47,
     edge: 2,
     status: 'PENDING_EVALUATION',
-    rec: 'PASS'
+    rec: 'PASS',
+    polyUrl: 'https://polymarket.com/event/italian-grand-prix-winner-2026'
   },
   {
     id: 'MONZA_2026_FASTEST_LAP',
@@ -165,7 +168,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 50,
     edge: 18,
     status: 'PENDING_EVALUATION',
-    rec: 'BUY_YES'
+    rec: 'BUY_YES',
+    polyUrl: 'https://polymarket.com/event/italian-gp-fastest-lap-2026'
   },
   {
     id: 'SPA_2026_VERSTAPPEN',
@@ -180,7 +184,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 50,
     edge: 8,
     status: 'PENDING_EVALUATION',
-    rec: 'AWAITING'
+    rec: 'AWAITING',
+    polyUrl: 'https://polymarket.com/event/belgian-grand-prix-winner-2026'
   },
   {
     id: 'SILVERSTONE_2026_HAMILTON',
@@ -195,7 +200,8 @@ const INITIAL_MARKETS_CATALOG = [
     fairProb: 50,
     edge: 0,
     status: 'PENDING_EVALUATION',
-    rec: 'AWAITING'
+    rec: 'AWAITING',
+    polyUrl: 'https://polymarket.com/event/british-grand-prix-winner-2026'
   }
 ];
 
@@ -358,13 +364,15 @@ export default function PitwallDashboard() {
   };
 
   // 1. Fetch Real User Balance Directly from Contract Storage
-  const fetchUserBalanceFromChain = async () => {
+  const fetchUserBalanceFromChain = async (wallet: string = userWallet) => {
     try {
+      const target = (wallet || userWallet || '').trim().toLowerCase();
+      if (!target) return 0;
       const client = createClient({ endpoint: GENLAYER_RPC });
       const rawBal = await client.readContract({
         address: CONTRACT_ADDRESS as any,
         functionName: 'get_user_balance',
-        args: [userWallet]
+        args: [target]
       }) as any;
       const balNum = Number(rawBal) / 10**6;
       setUserUsdcBalance(balNum);
@@ -373,6 +381,13 @@ export default function PitwallDashboard() {
       return 0;
     }
   };
+
+  // Sync real on-chain balance whenever userWallet changes or initializes
+  useEffect(() => {
+    if (userWallet) {
+      fetchUserBalanceFromChain(userWallet);
+    }
+  }, [userWallet]);
 
   // 2. Query Real On-Chain Market from GenLayer Contract
   const fetchMarketFromChain = async (marketIdToFetch: string = selectedMarketId) => {
@@ -464,13 +479,29 @@ export default function PitwallDashboard() {
       addLog(`⚡ [TX BROADCAST] Faucet Tx Hash: ${txHash}`);
       addLog(`⏳ Awaiting validator receipt confirmation from GenLayer testnet...`);
 
-      const receipt = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
-      const statusName = (receipt as any)?.status_name || (receipt as any)?.status || 'ACCEPTED';
-      const resultName = (receipt as any)?.result_name || '';
+      let receipt: any = await client.waitForTransactionReceipt({ hash: txHash as any, retries: 35, interval: 2000 });
+      let statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
+      let resultName = receipt?.result_name || '';
+
+      // Automatic retry if testnet validator slot experienced transient NO_MAJORITY
+      if (resultName === 'NO_MAJORITY') {
+        addLog(`⚠️ [CONSENSUS NOTICE] Validator slot had NO_MAJORITY. Auto-retrying round 2...`);
+        const retryTxHash = await client.writeContract({
+          address: CONTRACT_ADDRESS as any,
+          functionName: 'faucet',
+          args: [userWallet, 500000000],
+          value: 0
+        }) as string;
+        setActiveTxHash(retryTxHash);
+        addLog(`⚡ [RETRY TX BROADCAST] Faucet Retry Tx Hash: ${retryTxHash}`);
+        receipt = await client.waitForTransactionReceipt({ hash: retryTxHash as any, retries: 35, interval: 2000 });
+        resultName = receipt?.result_name || '';
+        statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
+      }
 
       if (resultName === 'NO_MAJORITY') {
         setTxStatus('FAILED');
-        addLog(`⚠️ [CONSENSUS NOTICE] Testnet validator round had NO_MAJORITY. Retrying claim...`);
+        addLog(`⚠️ [CONSENSUS NOTICE] Testnet validator slot unresolved. Click again to retry.`);
       } else {
         setTxStatus('CONFIRMED');
         addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${txHash.slice(0, 18)}...)`);
@@ -478,10 +509,10 @@ export default function PitwallDashboard() {
 
       // Read real balance back from on-chain contract with retry
       let newBal = 0;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        newBal = await fetchUserBalanceFromChain();
+      for (let attempt = 0; attempt < 4; attempt++) {
+        newBal = await fetchUserBalanceFromChain(userWallet);
         if (newBal > 0) break;
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 1200));
       }
 
       if (newBal > 0) {
@@ -1247,21 +1278,33 @@ export default function PitwallDashboard() {
                         </div>
                       </div>
 
-                      {/* Action Button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectMarket(item.id);
-                        }}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                          isSelected
-                            ? 'bg-rose-600 text-white shadow-md'
-                            : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700'
-                        }`}
-                      >
-                        {isSelected ? <Check className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                        {isSelected ? 'Active Market Loaded' : 'Trade & Inspect Telemetry'}
-                      </button>
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectMarket(item.id);
+                          }}
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            isSelected
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700'
+                          }`}
+                        >
+                          {isSelected ? <Check className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          {isSelected ? 'Active Market Loaded' : 'Trade & Inspect Telemetry'}
+                        </button>
+                        <a
+                          href={item.polyUrl || `https://polymarket.com/event/${item.id.toLowerCase()}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2.5 py-2.5 bg-blue-950/60 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-600/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shrink-0"
+                          title="View Live Orderbook on Polymarket"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
                     </div>
                   );
                 })}
@@ -1467,6 +1510,27 @@ export default function PitwallDashboard() {
                         Base Sepolia (MetaMask)
                       </button>
                     </div>
+                  </div>
+
+                  {/* Direct Polymarket Orderbook Route */}
+                  <div className="bg-gradient-to-r from-blue-950/40 via-purple-950/30 to-blue-950/40 border border-blue-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs font-mono">
+                    <div>
+                      <span className="text-blue-300 font-bold block flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                        REAL POLYMARKET ORDERBOOK:
+                      </span>
+                      <span className="text-slate-400 text-[11px]">
+                        Execute this exact wager directly on Polymarket (Polygon)
+                      </span>
+                    </div>
+                    <a
+                      href={market?.polymarket_url || 'https://polymarket.com'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all flex items-center gap-1 shrink-0 shadow-md shadow-blue-600/30"
+                    >
+                      <span>Trade on Polymarket ↗</span>
+                    </a>
                   </div>
 
                   {/* 100% Autonomous AI Consensus Race Resolution Action */}
