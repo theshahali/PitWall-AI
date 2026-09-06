@@ -1,7 +1,10 @@
-const { createClient } = require('genlayer-js');
-const { keccak256, toHex, encodeFunctionData } = require('viem');
+const path = require('path');
+const genlayerPath = path.resolve(__dirname, '..', 'frontend', 'node_modules', 'genlayer-js');
+const viemPath = path.resolve(__dirname, '..', 'frontend', 'node_modules', 'viem');
+const { createClient } = require(genlayerPath);
+const { keccak256, toHex, encodeFunctionData } = require(viemPath);
 
-const CONTRACT_ADDRESS = '0x3f6E2Bb5cbe483F937B7bd0D325bc39b11d77656';
+const CONTRACT_ADDRESS = '0x79c95E2ef3493fFEf92a6D0cd340dd1C5bed1Ec8';
 const GENLAYER_RPC = 'https://studio.genlayer.com/api';
 
 async function runE2ETest() {

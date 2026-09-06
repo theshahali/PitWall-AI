@@ -44,8 +44,8 @@ import {
   Wallet
 } from 'lucide-react';
 
-// Live Upgraded Intelligent Contract with Native On-Chain Vault
-const CONTRACT_ADDRESS = '0x3f6E2Bb5cbe483F937B7bd0D325bc39b11d77656' as any;
+// Live Upgraded Intelligent Contract with $10,000 On-Chain Bankroll
+const CONTRACT_ADDRESS = '0x79c95E2ef3493fFEf92a6D0cd340dd1C5bed1Ec8' as any;
 const GENLAYER_RPC = 'https://studio.genlayer.com/api';
 const GENLAYER_EXPLORER = 'https://explorer-studio.genlayer.com';
 const EVM_VAULT_ADDRESS = '0x49B317cA7e19F4F64Ad83bFEB8E82B31f57560B8' as any;
@@ -495,7 +495,7 @@ export default function PitwallDashboard() {
     setIsCallingRpc(true);
     setTxStatus('BROADCASTING');
     const target = userWallet.trim().toLowerCase();
-    addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${target.slice(0, 8)}...", 500 USDC)...`);
+    addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${target.slice(0, 8)}...", 5,000 USDC)...`);
 
     try {
       // Use fresh signer for transaction to guarantee unique nonce
@@ -505,7 +505,7 @@ export default function PitwallDashboard() {
       const finalTx = await client.writeContract({
         address: CONTRACT_ADDRESS as any,
         functionName: 'faucet',
-        args: [target, 500000000],
+        args: [target, 5000000000],
         value: 0
       }) as string;
 
@@ -589,7 +589,7 @@ export default function PitwallDashboard() {
   // 5. REAL ON-CHAIN WAGER: Locks Collateral & Mints Conditional Tokens on Contract
   const handleExecuteWager = async () => {
     if (userUsdcBalance < wagerAmount && settlementNetwork === 'GENLAYER') {
-      addLog(`🚨 [INSUFFICIENT FUNDS] You need at least ${wagerAmount} USDC. Click "+500 Test USDC" to get real on-chain faucet funds!`);
+      addLog(`🚨 [INSUFFICIENT FUNDS] You need at least ${wagerAmount} USDC. Click "+5,000 Top-Up" to get real on-chain faucet funds!`);
       return;
     }
 
@@ -1000,10 +1000,10 @@ export default function PitwallDashboard() {
               onClick={handleClaimFaucet}
               disabled={isCallingRpc}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-950"
-              title="Claim 500 Test USDC on GenLayer"
+              title="Claim +5,000 Test USDC on GenLayer"
             >
               <Coins className="w-3.5 h-3.5 text-emerald-400" />
-              {isCallingRpc ? 'Broadcasting...' : '+500 Test USDC'}
+              {isCallingRpc ? 'Broadcasting...' : '+5,000 Top-Up'}
             </button>
 
             {/* Vault Balance Display */}

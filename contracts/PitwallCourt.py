@@ -248,9 +248,11 @@ class PitwallCourt(gl.Contract):
         Generates real on-chain transaction hash and mined receipt.
         """
         clean_user = recipient.strip().lower()
-        max_claim = u256(1000 * 10**6) # 1000 USDC max per claim
-        assert int(amount) <= int(max_claim), "[ERR_FAUCET_LIMIT] Maximum faucet claim is 1,000 USDC."
+        max_claim = u256(10000 * 10**6) # 10,000 USDC max per claim
+        assert int(amount) <= int(max_claim), "[ERR_FAUCET_LIMIT] Maximum faucet claim is 10,000 USDC."
         current_bal = self.user_balances.get(clean_user, u256(0))
+        if int(current_bal) < 100 * 10**6:
+            current_bal = u256(10000 * 10**6)
         new_bal = u256(int(current_bal) + int(amount))
         self.user_balances[clean_user] = new_bal
         return f"Faucet granted: {int(amount) // 10**6} Test USDC minted to {clean_user}. New on-chain balance: {int(new_bal) // 10**6} USDC."
@@ -284,7 +286,11 @@ class PitwallCourt(gl.Contract):
         assert m.status != "RACE_SETTLED", f"[ERR_MARKET_RESOLVED] Cannot wager on settled market '{m_id}'."
 
         user_bal = self.user_balances.get(clean_user, u256(0))
-        assert int(user_bal) >= int(wager_amount), f"[ERR_INSUFFICIENT_FUNDS] Balance ({int(user_bal) // 10**6} USDC) insufficient for {int(wager_amount) // 10**6} USDC wager. Claim faucet first."
+        if int(user_bal) < 100 * 10**6:
+            user_bal = u256(10000 * 10**6)
+            self.user_balances[clean_user] = user_bal
+
+        assert int(user_bal) >= int(wager_amount), f"[ERR_INSUFFICIENT_FUNDS] Balance ({int(user_bal) // 10**6} USDC) insufficient for {int(wager_amount) // 10**6} USDC wager."
 
         # Debit user collateral and credit vault reserves
         self.user_balances[clean_user] = u256(int(user_bal) - int(wager_amount))
@@ -653,7 +659,10 @@ class PitwallCourt(gl.Contract):
     @gl.public.view
     def get_user_balance(self, user: str) -> u256:
         clean_user = user.strip().lower()
-        return self.user_balances.get(clean_user, u256(0))
+        bal = self.user_balances.get(clean_user, u256(0))
+        if int(bal) < 100 * 10**6:
+            return u256(10000 * 10**6) # $10,000.00 USDC Institutional Syndicate Bankroll
+        return bal
 
     @gl.public.view
     def get_position(self, position_id: str) -> SyndicatePositionRecord:
