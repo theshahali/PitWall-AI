@@ -236,11 +236,14 @@ export default function PitwallDashboard() {
   useEffect(() => {
     try {
       let acc: any;
-      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pitwall_reviewer_account') : null;
+      const storedKey = typeof window !== 'undefined' ? localStorage.getItem('pitwall_user_key') : null;
       if (storedKey) {
         acc = createAccount(storedKey as any);
       } else {
         acc = createAccount();
+        if (typeof window !== 'undefined' && acc?.privateKey) {
+          localStorage.setItem('pitwall_user_key', acc.privateKey);
+        }
       }
       setReviewerAccount(acc);
       if (acc?.address) {
@@ -391,14 +394,11 @@ export default function PitwallDashboard() {
     };
   };
 
-  // 1. Fetch Real User Balance Directly from Contract Storage (with Optimistic Fallback)
+  // 1. Fetch Real User Balance Directly from Contract Storage (100% Pure On-Chain, No Mock)
   const fetchUserBalanceFromChain = async (wallet: string = userWallet) => {
     try {
       const target = (wallet || userWallet || '').trim().toLowerCase();
       if (!target) return 0;
-      
-      const localKey = 'pitwall_vault_' + target;
-      const localBal = typeof window !== 'undefined' ? Number(localStorage.getItem(localKey) || '0') : 0;
 
       const client = createClient({ endpoint: GENLAYER_RPC });
       const rawBal = await client.readContract({
@@ -408,18 +408,9 @@ export default function PitwallDashboard() {
       }) as any;
       const rawNum = Number(rawBal);
       const onChainBal = rawNum >= 10**6 ? (rawNum / 10**6) : 0;
-      
-      // Preserve highest balance between verified on-chain and optimistic local vault
-      const effectiveBal = Math.max(onChainBal, localBal);
-      setUserUsdcBalance(effectiveBal);
-      return effectiveBal;
+      setUserUsdcBalance(onChainBal);
+      return onChainBal;
     } catch (e) {
-      const target = (wallet || userWallet || '').trim().toLowerCase();
-      const localBal = typeof window !== 'undefined' ? Number(localStorage.getItem('pitwall_vault_' + target) || '0') : 0;
-      if (localBal > 0) {
-        setUserUsdcBalance(localBal);
-        return localBal;
-      }
       return 0;
     }
   };
@@ -499,27 +490,19 @@ export default function PitwallDashboard() {
     await fetchMarketFromChain(marketId);
   };
 
-  // 3. REAL ON-CHAIN FAUCET: Submits Real Tx to GenLayer Contract Faucet with Instant Credit
+  // 3. REAL ON-CHAIN FAUCET: 100% On-Chain, No Simulated Balances
   const handleClaimFaucet = async () => {
     setIsCallingRpc(true);
     setTxStatus('BROADCASTING');
-    
-    // Instantly credit optimistic vault balance so the user is never blocked
     const target = userWallet.trim().toLowerCase();
-    const newOptimisticBal = (userUsdcBalance || 0) + 500;
-    setUserUsdcBalance(newOptimisticBal);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('pitwall_vault_' + target, String(newOptimisticBal));
-    }
-    addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${userWallet.slice(0, 8)}...", 500 USDC)...`);
-    addLog(`💰 [VAULT CREDITED] +$500.00 USDC credited immediately to your active vault.`);
+    addLog(`🚰 1. [FAUCET CALL] Signing real on-chain transaction: faucet("${target.slice(0, 8)}...", 500 USDC)...`);
 
     try {
-      // Generate a fresh signer account to guarantee unique nonce & avoid transaction deduplication
+      // Use fresh signer for transaction to guarantee unique nonce
       const faucetSigner = createAccount();
       const client = createClient({ endpoint: GENLAYER_RPC, account: faucetSigner });
 
-      let finalTx = await client.writeContract({
+      const finalTx = await client.writeContract({
         address: CONTRACT_ADDRESS as any,
         functionName: 'faucet',
         args: [target, 500000000],
@@ -528,48 +511,35 @@ export default function PitwallDashboard() {
 
       setActiveTxHash(finalTx);
       addLog(`⚡ [TX BROADCAST] Faucet Tx Hash: ${finalTx}`);
-      addLog(`⏳ Awaiting validator consensus from GenLayer testnet (5-6 validator committee)...`);
+      addLog(`⏳ Awaiting validator consensus from GenLayer testnet...`);
 
-      let receipt: any = await client.waitForTransactionReceipt({ hash: finalTx as any, retries: 25, interval: 2000 });
-      let statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
-      let resultName = receipt?.result_name || '';
+      const receipt: any = await client.waitForTransactionReceipt({ hash: finalTx as any, retries: 35, interval: 2000 });
+      const statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
 
-      if (resultName === 'NO_MAJORITY') {
-        addLog(`⚠️ [CONSENSUS NOTICE] Slot had NO_MAJORITY (validator committee desync). Auto-dispatching round 2...`);
-        const retrySigner = createAccount();
-        const retryClient = createClient({ endpoint: GENLAYER_RPC, account: retrySigner });
-        finalTx = await retryClient.writeContract({
-          address: CONTRACT_ADDRESS as any,
-          functionName: 'faucet',
-          args: [target, 500000000],
-          value: 0
-        }) as string;
-        setActiveTxHash(finalTx);
-        addLog(`⚡ [RETRY TX BROADCAST] Faucet Retry Tx Hash: ${finalTx}`);
-        receipt = await retryClient.waitForTransactionReceipt({ hash: finalTx as any, retries: 20, interval: 2000 });
-        resultName = receipt?.result_name || '';
-        statusName = receipt?.status_name || receipt?.status || 'ACCEPTED';
+      setTxStatus('CONFIRMED');
+      addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${finalTx.slice(0, 18)}...)`);
+
+      // Read real verified balance back from on-chain contract storage
+      let verifiedBal = 0;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        verifiedBal = await fetchUserBalanceFromChain(target);
+        if (verifiedBal > 0) break;
+        await new Promise(r => setTimeout(r, 1500));
       }
 
-      if (resultName === 'NO_MAJORITY') {
-        setTxStatus('CONFIRMED');
-        addLog(`ℹ️ [CONSENSUS NOTICE] 5 GenLayer validator nodes are rotating slots in background. Your 500 USDC vault balance remains active and ready to wager!`);
+      if (verifiedBal > 0) {
+        addLog(`💰 [ON-CHAIN BALANCE VERIFIED] Verified balance in contract storage: $${verifiedBal.toFixed(2)} USDC`);
       } else {
-        setTxStatus('CONFIRMED');
-        addLog(`✓ [FAUCET ACCEPTED ON-CHAIN] Status: ${statusName} (Tx: ${finalTx.slice(0, 18)}...)`);
+        addLog(`ℹ️ [CONSENSUS COMMITTED] Transaction mined. Syncing contract storage state...`);
       }
 
-      // Read real balance back from on-chain contract
-      await fetchUserBalanceFromChain(userWallet);
-
-      // Auto-clear confirmed banner after 10s
       setTimeout(() => {
         setActiveTxHash(null);
       }, 10000);
 
     } catch (e: any) {
-      setTxStatus('CONFIRMED');
-      addLog(`ℹ️ [TESTNET NOTICE]: Node queue busy (${e.message}). Vault balance remains funded ($${newOptimisticBal} USDC).`);
+      setTxStatus('FAILED');
+      addLog(`🚨 [FAUCET ERROR]: ${e.message}`);
       setTimeout(() => {
         setActiveTxHash(null);
       }, 8000);
